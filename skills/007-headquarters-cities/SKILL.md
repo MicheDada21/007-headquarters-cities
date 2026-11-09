@@ -28,7 +28,7 @@ Every answer comes from the ledger: one row per claim, with a URL and a verbatim
 
 2. Operator. Decide who runs each entity from its own site, its footer and imprint. For every entity made by a larger company, check whether that company built it or bought it: search `<entity> acquired by` and the company's own announcement. Done when every entity has an operator, and every acquired one has an `acquired_by` row with a quote.
 
-3. Offices. Climb the rungs in [references/source-ladder.md](references/source-ladder.md) for each operator. Work in waves and send every lookup of a wave at once; for more than 15 entities, split the waves across subagents when the host can start them. Spend at most four lookups per entity, plus a fifth in the home-market language when none of the four used it and it isn't English, then record `not_public`. Done when every entity has at least one ranked city or `not_public`.
+3. Offices. Climb the rungs in [references/source-ladder.md](references/source-ladder.md) for each operator. Work in waves and send every lookup of a wave at once; for more than 15 entities, split the waves across subagents when the host can start them; each returns its claims with URL and quote, and the main agent alone writes the ledger. Spend at most four lookups per entity, plus a fifth in the home-market language when none of the four used it and it isn't English, then record `not_public`. Done when every entity has at least one ranked city or `not_public`.
 
 4. Ledger. Write `ledger.jsonl`, one row per claim:
 
