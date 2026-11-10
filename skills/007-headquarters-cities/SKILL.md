@@ -1,6 +1,6 @@
 ---
 name: 007-headquarters-cities
-description: "Find the cities of up to three main headquarters of companies, products or tools, written as City (Country) in rank order, each backed by a verbatim quote in a JSONL ledger. Use when the user asks where a company is based, where its main offices or headquarters are, or wants that data checked."
+description: "Lists up to three main headquarters as City (Country) in rank order, each backed by a verbatim quote from the company's own pages. Use when asking where a company or tool is based."
 ---
 
 # 007 headquarters cities
