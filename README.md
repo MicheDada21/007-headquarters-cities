@@ -2,7 +2,7 @@
 
 Elenca fino a tre sedi principali di un'azienda nella forma Città (Paese), in ordine di importanza, ognuna con una citazione letterale dalle sue pagine.
 
-Fa parte della [Prompt Library di CH Labs](https://www.cryptohelvetia.com/ch-labs/prompt-library), dove la pagina di riferimento è [Locate up to three company headquarters](https://www.cryptohelvetia.com/ch-labs/prompt-library/skills/007-headquarters-cities). Il repo contiene una copia della skill, rigenerata a ogni aggiornamento della libreria.
+Fa parte della [Prompt Library di CH Labs](https://www.cryptohelvetia.com/ch-labs/prompt-library), dove la pagina di riferimento è [007 headquarters cities](https://www.cryptohelvetia.com/ch-labs/prompt-library/skills/007-headquarters-cities). Il repo contiene una copia della skill, rigenerata a ogni aggiornamento della libreria.
 
 ## Installare
 
