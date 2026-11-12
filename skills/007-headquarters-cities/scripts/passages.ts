@@ -7,11 +7,11 @@
 //
 // search: one line per result, `url  title`, deduplicated across queries.
 // read: fetches every URL in parallel (Browserbase Fetch, then curl), keeps the page text in --dir,
-//       and prints about --width characters around each match of the pattern.
+//       and prints about --width characters around each match of the pattern, cut at word or sentence ends.
 // stdin: same filter on text piped in, for example `browse get markdown` from a remote session.
 
 const DEFAULT_PATTERN =
-  "headquarter|\\bHQ\\b|head office|offices?\\b|located in|based in|registered office|address|\\b(Inc|Ltd|LLC|GmbH|AG|SA|SAS|SRL|S\\.p\\.A|B\\.V)\\b|sede|hauptsitz|siège|sitz";
+  "headquarter|\\bHQ\\b|head office|offices?\\b|located in|based in|registered|(?<!e-?mail |IP )address|data controller|commercial regist|imprint|impressum|handelsregister|amtsgericht|(?<!\\p{L})(?-i:Inc|Ltd|LLC|GmbH|AG|SA|SE|OÜ|AB|Oy|ApS|AS|NV|KG|plc|Pty|SAS|SARL|Sàrl|SRL|S\\.p\\.A|B\\.V)(?!\\p{L})|sede|hauptsitz|firmensitz|siège|sitz\\b";
 
 const TINY = 800;
 
@@ -69,30 +69,60 @@ async function search(queries: string[], opts: Opts) {
   });
 }
 
+const ENTITIES: Record<string, string> = { nbsp: " ", amp: "&", quot: '"', apos: "'", lt: "<", gt: ">", ndash: "–", mdash: "—", rsquo: "’", lsquo: "‘", rdquo: "”", ldquo: "“" };
+
+// Page text as a reader sees it, so a quote copied from a passage is found verbatim on the page.
 function plain(text: string) {
   return text
-    .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
+    .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<!--[\s\S]*?-->/gi, " ")
+    .replace(/<\/?(a|span|b|i|em|strong|sup|sub|small|abbr|code|bdi|font|mark|u|s)\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi, "")
+    .replace(/<(?:[^>"']|"[^"]*"|'[^']*')*>/g, " ")
+    .replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (m, e: string) =>
+      e[0] === "#" ? String.fromCodePoint(parseInt(e.slice(1).replace(/^x/i, ""), /^#x/i.test(e) ? 16 : 10)) : (ENTITIES[e.toLowerCase()] ?? m),
+    )
     .replace(/\[\\\[[^\]]*?\\\]\]\([^)]*\)/g, "")
     .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\]\(([^)]*)\)(?=\[)/g, "]($1) ")
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/[*_`#>|]+/g, " ")
+    .replace(/\\(?=\n)/g, "")
+    .replace(/\\([!-/:-@[-`{-~])/g, "$1")
+    .replace(/[*`]+/g, "")
+    .replace(/[#>|]+/g, " ")
+    .replace(/(^|\s)_+|_+(?=\s|$|[.,;:!?])/g, "$1 ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
+// Widens [start, end) to the nearest sentence end within reach, otherwise to the nearest space.
+function snap(text: string, start: number, end: number) {
+  const reach = 120;
+  const before = text.slice(Math.max(0, start - reach), start);
+  const sentence = Math.max(before.lastIndexOf(". "), before.lastIndexOf("! "), before.lastIndexOf("? "));
+  if (start > 0) start = sentence >= 0 ? start - before.length + sentence + 2 : Math.max(0, text.lastIndexOf(" ", start) + 1);
+  const after = text.slice(end, end + reach).search(/[.!?](\s|$)/);
+  if (end < text.length) end = after >= 0 ? end + after + 1 : (text.indexOf(" ", end) + 1 || text.length + 1) - 1;
+  return [start, end] as const;
+}
+
+// Menus and footers repeat on every page of a site; each passage prints once per run.
+const printed = new Set<string>();
+
 function passages(text: string, opts: Opts) {
   const spans: [number, number][] = [];
   for (const m of text.matchAll(opts.pattern)) {
-    const start = Math.max(0, m.index! - opts.width / 2);
-    const end = Math.min(text.length, m.index! + m[0].length + opts.width / 2);
+    const [start, end] = snap(
+      text,
+      Math.max(0, m.index! - opts.width / 2),
+      Math.min(text.length, m.index! + m[0].length + opts.width / 2),
+    );
     const last = spans.at(-1);
-    if (last && start <= last[1]) last[1] = end;
+    if (last && start <= last[1]) last[1] = Math.max(last[1], end);
     else spans.push([start, end]);
   }
-  return spans.map(([s, e]) => `> ${text.slice(s, e)}`);
+  return spans
+    .map(([s, e]) => text.slice(s, e).trim())
+    .filter((p) => !printed.has(p) && printed.add(p))
+    .map((p) => `> ${p}`);
 }
 
 function report(label: string, raw: string, opts: Opts, file?: string) {
@@ -105,28 +135,37 @@ function report(label: string, raw: string, opts: Opts, file?: string) {
     return;
   }
   const found = passages(text, opts);
-  console.log(found.length ? found.join("\n") : "no match");
+  console.log(found.length ? found.join("\n") : "no new match");
 }
 
 function slug(url: string) {
   return url.replace(/^https?:\/\//, "").replace(/[^a-z0-9]+/gi, "_").slice(0, 120) + ".md";
 }
 
+async function fetchPage(url: string, file: string) {
+  // Browserbase Fetch fails now and then under load; one retry saves the curl fallback, whose HTML reads worse.
+  for (let i = 0; i < 2; i++) {
+    const bb = await run(["browse", "cloud", "fetch", url, "--allow-redirects", "--output", file]);
+    const text = bb.ok && (await Bun.file(file).exists()) ? await Bun.file(file).text() : "";
+    if (plain(text).length >= TINY) return text;
+  }
+  // Blocked, rate-limited or empty: plain HTTP sometimes gets the full page.
+  const curl = await run(["curl", "-sL", "--max-time", "30", "-A", "Mozilla/5.0", url]);
+  const kept = (await Bun.file(file).exists()) ? await Bun.file(file).text() : "";
+  const best = plain(curl.out).length > plain(kept).length ? curl.out : kept;
+  await Bun.write(file, best);
+  return best;
+}
+
 async function read(urls: string[], opts: Opts) {
   await Bun.$`mkdir -p ${opts.dir}`.quiet();
-  await Promise.all(
+  const pages = await Promise.all(
     urls.map(async (url) => {
       const file = `${opts.dir}/${slug(url)}`;
-      const bb = await run(["browse", "cloud", "fetch", url, "--allow-redirects", "--output", file]);
-      const fetched = bb.ok && (await Bun.file(file).exists()) ? await Bun.file(file).text() : "";
-      if (plain(fetched).length < TINY) {
-        // Blocked, rate-limited or empty: plain HTTP sometimes gets the full page.
-        const curl = await run(["curl", "-sL", "--max-time", "30", "-A", "Mozilla/5.0", url]);
-        if (plain(curl.out).length > plain(fetched).length) await Bun.write(file, curl.out);
-      }
-      return { url, file, raw: await Bun.file(file).text() };
+      return { url, file, raw: await fetchPage(url, file) };
     }),
-  ).then((pages) => pages.forEach((p) => report(p.url, p.raw, opts, p.file)));
+  );
+  pages.forEach((p) => report(p.url, p.raw, opts, p.file));
 }
 
 const [mode, ...rest] = process.argv.slice(2);
