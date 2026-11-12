@@ -16,7 +16,11 @@ Query the operator's name plus `headquarters`, `head office` or `offices`, and i
 
 ## Reading pages
 
-- Use a search API that returns result URLs, and a lightweight fetch that returns page text as Markdown. Both are stateless, so run a wave's calls in parallel.
-- Extract passages with a short script that prints about 200 characters around matches for `headquarter|HQ|head office|offices|located in|based in|registered office|address|Inc\.|Ltd|GmbH|AG|SA|SAS|B\.V\.` and their equivalents in the page's language. Print only those passages, so large pages stay out of context.
-- An empty or tiny result means the page renders with JavaScript. Open it in a headless or remote browser.
+Use `scripts/passages.ts` in this skill's folder (needs Bun; it uses the Browserbase `browse` CLI when installed and plain HTTP otherwise). Run it by its full path from the folder that holds the ledger. It prints only what the ledger needs, so search results and whole pages stay out of context.
+
+- `bun scripts/passages.ts search "<query>" "<query>" ...` prints one `url  title` line per result. Put every query of a wave in one call.
+- `bun scripts/passages.ts read <url> <url> ...` fetches the wave's pages in parallel, keeps each one in `pages/`, and prints about 200 characters around office and address words. Add the words of the page's language with `--add "Firmensitz|indirizzo"`.
+- A tiny page prints its first characters and the command that opens it in a remote browser, whose `browse get markdown` output goes through `bun scripts/passages.ts stdin <url>`.
+- Copy each quote from a printed passage. When a passage is cut short, `grep` a few more words around it in the kept page instead of reading the whole file.
 - Search tools that return a written summary instead of page text give leads only. Open the page and copy the quote yourself.
+- Without Bun, use the host's search and fetch, save the page text to a file, and print only the passages that match with a short script.
