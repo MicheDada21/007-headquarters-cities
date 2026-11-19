@@ -1,14 +1,16 @@
 #!/usr/bin/env bun
-// Prints only the passages a ledger needs, so whole pages stay out of the agent's context.
+// Prints only the passages a ledger needs, so search results and whole pages stay out of the agent's context.
 //
+//   bun passages.ts search "<query>" ["<query>" ...] [--n 8]
 //   bun passages.ts read <url> [<url> ...] [--add "<regex>"] [--pattern "<regex>"] [--width 200] [--dir pages]
 //   <command> | bun passages.ts stdin <label> [--add ...]
 //
-// read: fetches every URL with plain HTTP (curl, at most 4 at a time), keeps the page text in --dir,
+// search: Browserbase Search, one line per result, `url  title`, deduplicated across queries.
+// read: fetches the URLs at most 4 at a time (Browserbase Fetch, then curl), keeps the page text in --dir,
 //       and prints about --width characters around each match of the pattern, cut at word or sentence ends.
 // stdin: same filter on text piped in, for example `browse get markdown` from a browser session.
-// Search with the host's own web search. Never call Browserbase Search or Fetch from here: they are billed
-// per call and blocked by the guard described in ~/.agents/agents-services.md.
+// Search and Fetch go through the `browse` guard (~/.agents/agents-services.md), which caps them under the
+// monthly quota. When it refuses, search tells the agent to use the host's web search and read uses curl.
 
 const DEFAULT_PATTERN =
   "headquarter|\\bHQ\\b|head office|offices?\\b|located in|based in|registered|(?<!e-?mail |IP )address|data controller|commercial regist|imprint|impressum|handelsregister|amtsgericht|(?<!\\p{L})(?-i:Inc|Ltd|LLC|GmbH|AG|SA|SE|OÜ|AB|Oy|ApS|AS|NV|KG|plc|Pty|SAS|SARL|Sàrl|SRL|S\\.p\\.A|B\\.V)(?!\\p{L})|sede|hauptsitz|firmensitz|siège|sitz\\b";
@@ -17,33 +19,64 @@ const TINY = 800;
 
 const PARALLEL = 4;
 
-type Opts = { width: number; dir: string; pattern: RegExp };
+type Opts = { n: number; width: number; dir: string; pattern: RegExp };
 
 function parseArgs(argv: string[]) {
   const pos: string[] = [];
+  let n = 8;
   let width = 200;
   let dir = "pages";
   let pattern = DEFAULT_PATTERN;
   let add = "";
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--width") width = Number(argv[++i]);
+    if (a === "--n") n = Number(argv[++i]);
+    else if (a === "--width") width = Number(argv[++i]);
     else if (a === "--dir") dir = argv[++i];
     else if (a === "--pattern") pattern = argv[++i];
     else if (a === "--add") add = argv[++i];
     else pos.push(a);
   }
   const source = add ? `${pattern}|${add}` : pattern;
-  return { pos, opts: { width, dir, pattern: new RegExp(source, "giu") } as Opts };
+  return { pos, opts: { n, width, dir, pattern: new RegExp(source, "giu") } as Opts };
 }
 
-async function run(cmd: string[]): Promise<{ ok: boolean; out: string }> {
+async function run(cmd: string[]): Promise<{ ok: boolean; code: number; out: string }> {
   try {
     const p = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
     const out = await new Response(p.stdout).text();
-    return { ok: (await p.exited) === 0, out };
+    const code = await p.exited;
+    return { ok: code === 0, code, out };
   } catch {
-    return { ok: false, out: "" };
+    return { ok: false, code: -1, out: "" };
+  }
+}
+
+// Exit 2 from `browse cloud ...` is the guard refusing (quota cap): stop asking Browserbase for this run.
+let capped = false;
+
+async function search(queries: string[], opts: Opts) {
+  const seen = new Set<string>();
+  for (const q of queries) {
+    console.log(`# ${q}`);
+    const r = capped ? null : await run(["browse", "cloud", "search", q, "--num-results", String(opts.n), "--json"]);
+    if (r?.code === 2) capped = true;
+    if (!r?.ok) {
+      console.log("Browserbase Search unavailable: use the host's own web search for this query");
+      continue;
+    }
+    let data: { results?: { url: string; title?: string }[] };
+    try {
+      data = JSON.parse(r.out);
+    } catch {
+      console.log("search returned no JSON");
+      continue;
+    }
+    for (const { url, title } of data.results ?? []) {
+      if (seen.has(url)) continue;
+      seen.add(url);
+      console.log(`${url}  ${title ?? ""}`.trim());
+    }
   }
 }
 
@@ -108,7 +141,7 @@ function report(label: string, raw: string, opts: Opts, file?: string) {
   console.log(`## ${label} (${text.length} chars${file ? `, ${file}` : ""})`);
   if (text.length < TINY) {
     console.log(
-      `tiny page (blocked, an error or rendered with JavaScript): ${text.slice(0, 160)}\nopen it with: browse open ${label} --local (--remote only for a 403 or captcha), then browse get markdown | bun passages.ts stdin ${label}`,
+      `tiny page (blocked, an error or rendered with JavaScript): ${text.slice(0, 160)}\nopen it with: browse open ${label} --remote, then browse get markdown | bun passages.ts stdin ${label}`,
     );
     return;
   }
@@ -123,9 +156,18 @@ function slug(url: string) {
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36";
 
 async function fetchPage(url: string, file: string) {
+  if (!capped) {
+    const bb = await run(["browse", "cloud", "fetch", url, "--allow-redirects", "--output", file]);
+    if (bb.code === 2) capped = true;
+    const text = bb.ok && (await Bun.file(file).exists()) ? await Bun.file(file).text() : "";
+    if (plain(text).length >= TINY) return text;
+  }
+  // Refused by the guard, blocked or empty: plain HTTP is free and sometimes gets the full page.
   const curl = await run(["curl", "-sL", "--compressed", "--max-time", "30", "-A", UA, url]);
-  await Bun.write(file, curl.out);
-  return curl.out;
+  const kept = (await Bun.file(file).exists()) ? await Bun.file(file).text() : "";
+  const best = plain(curl.out).length > plain(kept).length ? curl.out : kept;
+  await Bun.write(file, best);
+  return best;
 }
 
 async function read(urls: string[], opts: Opts) {
@@ -147,10 +189,10 @@ async function read(urls: string[], opts: Opts) {
 
 const [mode, ...rest] = process.argv.slice(2);
 const { pos, opts } = parseArgs(rest);
-if (mode === "read" && pos.length) await read(pos, opts);
+if (mode === "search" && pos.length) await search(pos, opts);
+else if (mode === "read" && pos.length) await read(pos, opts);
 else if (mode === "stdin") report(pos[0] ?? "stdin", await Bun.stdin.text(), opts);
 else {
-  if (mode === "search") console.error("search: use the host's own web search, then pass the URLs to read.");
-  console.error("usage: passages.ts read <url> ... | stdin <label>");
+  console.error('usage: passages.ts search "<query>" ... | read <url> ... | stdin <label>');
   process.exit(1);
 }
