@@ -16,11 +16,10 @@ Query the operator's name plus `headquarters`, `head office` or `offices`, and i
 
 ## Reading pages
 
-Use `scripts/passages.ts` in this skill's folder (needs Bun; it uses the Browserbase `browse` CLI when installed and plain HTTP otherwise). Run it by its full path from the folder that holds the ledger. It prints only what the ledger needs, so search results and whole pages stay out of context.
+Search with the host's own web search; it returns URLs to open. Read them with `scripts/passages.ts` in this skill's folder (needs Bun; it reads pages with plain HTTP). Run it by its full path from the folder that holds the ledger. It prints only what the ledger needs, so whole pages stay out of context. Never call Browserbase Search or Fetch, by CLI, SDK or API: they are billed per call and blocked as `~/.agents/agents-services.md` describes.
 
-- `bun scripts/passages.ts search "<query>" "<query>" ...` prints one `url  title` line per result. Put every query of a wave in one call.
-- `bun scripts/passages.ts read <url> <url> ...` fetches the wave's pages in parallel, keeps each one in `pages/`, and prints about 200 characters around office and address words. Each passage ends at a sentence or a word, and one already printed in the run, such as a menu or footer, prints once. Add the words of the page's language with `--add "Firmensitz|indirizzo"`.
-- A tiny page prints its first characters and the command that opens it in a remote browser, whose `browse get markdown` output goes through `bun scripts/passages.ts stdin <url>`.
+- `bun scripts/passages.ts read <url> <url> ...` fetches the wave's pages, four at a time, keeps each one in `pages/`, and prints about 200 characters around office and address words. Each passage ends at a sentence or a word, and one already printed in the run, such as a menu or footer, prints once. Add the words of the page's language with `--add "Firmensitz|indirizzo"`.
+- A tiny page prints its first characters and the command that opens it with `browse open <url> --local`; use `--remote` only for a 403 or a captcha. Its `browse get markdown` output goes through `bun scripts/passages.ts stdin <url>`.
 - Copy each quote from a printed passage. When a passage is cut short, `grep` a few more words around it in the kept page instead of reading the whole file.
 - Search tools that return a written summary instead of page text give leads only. Open the page and copy the quote yourself.
 - Without Bun, use the host's search and fetch, save the page text to a file, and print only the passages that match with a short script.
