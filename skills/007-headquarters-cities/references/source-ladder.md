@@ -16,7 +16,7 @@ Query the operator's name plus `headquarters`, `head office` or `offices`, and i
 
 ## Reading pages
 
-Use `scripts/passages.ts` in this skill's folder (needs Bun). It searches and reads with Browserbase Search and Fetch while the monthly cap in `~/.agents/agents-services.md` allows, and falls back to plain HTTP when the guard refuses. Run it by its full path from the folder that holds the ledger. It prints only what the ledger needs, so search results and whole pages stay out of context. Call Browserbase only through `browse` or this script, never through the SDK or API.
+Use `scripts/passages.ts` in this skill's folder (needs Bun). It searches and reads with Browserbase Search and Fetch while your monthly Browserbase cap allows, and falls back to plain HTTP when a usage guard on `browse` refuses. Run it by its full path from the folder that holds the ledger. It prints only what the ledger needs, so search results and whole pages stay out of context. Call Browserbase only through `browse` or this script, never through the SDK or API.
 
 - `bun scripts/passages.ts search "<query>" "<query>" ...` prints one `url  title` line per result. Put every query of a wave in one call. When it says Search is unavailable, run those queries with the host's own web search.
 

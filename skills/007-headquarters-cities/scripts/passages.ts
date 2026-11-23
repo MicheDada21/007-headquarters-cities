@@ -9,7 +9,7 @@
 // read: fetches the URLs at most 4 at a time (Browserbase Fetch, then curl), keeps the page text in --dir,
 //       and prints about --width characters around each match of the pattern, cut at word or sentence ends.
 // stdin: same filter on text piped in, for example `browse get markdown` from a browser session.
-// Search and Fetch go through the `browse` guard (~/.agents/agents-services.md), which caps them under the
+// Search and Fetch go through `browse`; a usage guard, if you run one, caps them under the
 // monthly quota. When it refuses, search tells the agent to use the host's web search and read uses curl.
 
 const DEFAULT_PATTERN =
